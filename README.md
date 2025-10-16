@@ -1,7 +1,3 @@
-
-## 3) `README.md` (cleaned, polished — big beautiful doc)
-
-
 # Cold Brew (Small)
 
 **Minimal, auditable cold wallet generator + local regtest verifier.**
