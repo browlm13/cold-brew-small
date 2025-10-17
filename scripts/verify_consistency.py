@@ -70,6 +70,7 @@ def mnemonic_to_entropy(mn, wl):
 ap=argparse.ArgumentParser(description="Verify mnemonic and/or 64-hex yield same key/pubkey")
 ap.add_argument("--mnemonic", help="24 words")
 ap.add_argument("--hex", help="64 hex chars")
+ap.add_argument("--pubkey", help="optional compressed pubkey (66 hex) to verify, starts with 02/03")
 args=ap.parse_args()
 
 wl=load_words()
@@ -96,4 +97,15 @@ pubc = priv_to_pubc(priv)
 print("OK")
 print("PRIVATE_HEX:", priv.hex())
 print("PUBKEY_COMPRESSED_HEX:", pubc.hex())
+
+# Optional pubkey check
+if args.pubkey:
+    pk = args.pubkey.strip().lower()
+    if len(pk) != 66 or not (pk.startswith("02") or pk.startswith("03")):
+        print("ERR: --pubkey must be 66 hex starting with 02 or 03"); sys.exit(2)
+    if pk != pubc.hex():
+        print("FAIL: provided pubkey does NOT match derived pubkey"); sys.exit(1)
+    print("PUBKEY MATCH: provided pubkey == derived pubkey")
+
 sys.exit(0)
+
