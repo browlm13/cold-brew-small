@@ -96,6 +96,19 @@ Extra pubkey check (helpful if someone accidentally copied pubkey into --hex)
 python3 scripts/verify_consistency.py --mnemonic "..." --hex 0000...abcd --pubkey 02...
 ```
 
+How to use the `--infile option`
+
+```bash
+# verify using the single-line secret file your generator wrote:
+python3 scripts/verify_consistency.py --infile out/<run>/secret/private_hex.txt
+
+# verify using mnemonic file:
+python3 scripts/verify_consistency.py --infile out/<run>/secret/mnemonic.txt
+
+# verify using a pubkey file (this will check match):
+python3 scripts/verify_consistency.py --infile out/<run>/qr/pubkey.hex --infile out/<run>/secret/private_hex.txt --pubkey $(cat out/<run>/qr/pubkey.hex)
+```
+
 ### 3) Regtest (Core box, offline)
 
 From `SECRET_DO_NOT_EXPORT.txt` copy the `WIF (regtest)` and `P2PKH (regtest)` (keep the secret file offline):

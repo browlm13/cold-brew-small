@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-# verify_consistency.py — prove mnemonic(24) <-> 32-byte hex produce SAME priv/pub (pure Python)
-import sys, argparse, hashlib, os
+# verify_consistency.py — accept mnemonic and/or 64-hex private key (and optional pubkey),
+# plus an --infile option which can contain a mnemonic, 64-hex private, or 66-hex compressed pubkey.
+
+import sys, argparse, hashlib, os, re
 
 WORDLIST_PATH = os.path.join(os.path.dirname(__file__), "..", "wordlist.txt")
 
+# secp256k1 params / EC math (same as coldgen)
 p  = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
 a  = 0; b  = 7
 Gx = 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798
 Gy = 0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8
 n  = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 INF=None
+
 def inv_mod(x,m): return pow(x,m-2,m)
 def add(P,Q):
     if P is INF: return Q
@@ -29,83 +33,127 @@ def dbl(P):
     xr=(s*s-2*x1)%p; yr=(s*(x1-xr)-y1)%p
     return (xr,yr)
 def mul(k,P):
-    if k% n==0 or P is INF: return INF
-    if k<0: return mul(-k,(P[0],(-P[1])%p))
+    if k % n == 0 or P is INF: return INF
+    if k < 0: return mul(-k,(P[0],(-P[1])%p))
     R=INF; Q=P
     while k:
-        if k&1: R=add(R,Q)
-        Q=dbl(Q); k>>=1
+        if k & 1: R=add(R,Q)
+        Q=dbl(Q); k >>= 1
     return R
+
 def priv_to_pubc(dbytes: bytes)->bytes:
-    d=int.from_bytes(dbytes,'big')
-    if not (1<=d<n): sys.exit("private scalar out of range")
-    x,y=mul(d,(Gx,Gy))
+    d = int.from_bytes(dbytes, 'big')
+    if not (1 <= d < n): sys.exit("private scalar out of range")
+    x,y = mul(d,(Gx,Gy))
     return (b'\x02' if (y%2==0) else b'\x03') + x.to_bytes(32,'big')
 
+# wordlist helpers
 def load_words():
     with open(WORDLIST_PATH,"r",encoding="utf-8") as f:
         wl=[w.strip() for w in f if w.strip()]
     if len(wl)!=2048: sys.exit("wordlist must have 2048 words")
     return wl
+
 def bytes_to_bits(b): return ''.join(f"{x:08b}" for x in b)
 def bits_to_bytes(bs):
     assert len(bs)%8==0
     return bytes(int(bs[i:i+8],2) for i in range(0,len(bs),8))
 def checksum_bits(ent):
     return bytes_to_bits(hashlib.sha256(ent).digest())[:len(ent)*8//32]
+
 def mnemonic_to_entropy(mn, wl):
-    parts=mn.strip().split()
-    if len(parts) not in (12,15,18,21,24): sys.exit("expect 12/15/18/21/24 words")
+    parts = mn.strip().split()
+    if len(parts) not in (12,15,18,21,24):
+        sys.exit("expect 12/15/18/21/24 words")
     bits=""
     for w in parts:
         try: idx=wl.index(w)
         except ValueError: sys.exit(f"bad word: {w}")
-        bits+=f"{idx:011b}"
-    ent_len=len(parts)*11 - len(parts)*11//33
-    ent_bits=bits[:ent_len]; cs_bits=bits[ent_len:]
-    ent=bits_to_bytes(ent_bits)
-    if checksum_bits(ent)!=cs_bits: sys.exit("mnemonic checksum invalid")
+        bits += f"{idx:011b}"
+    ent_len = len(parts)*11 - len(parts)*11//33
+    ent_bits = bits[:ent_len]; cs_bits = bits[ent_len:]
+    ent = bits_to_bytes(ent_bits)
+    if checksum_bits(ent) != cs_bits:
+        sys.exit("mnemonic checksum invalid")
     return ent
 
-ap=argparse.ArgumentParser(description="Verify mnemonic and/or 64-hex yield same key/pubkey")
-ap.add_argument("--mnemonic", help="24 words")
-ap.add_argument("--hex", help="64 hex chars")
-ap.add_argument("--pubkey", help="optional compressed pubkey (66 hex) to verify, starts with 02/03")
-args=ap.parse_args()
+# auto-detect content type from a string (hex or words)
+HEX64_RE = re.compile(r'^[0-9a-fA-F]{64}$')
+HEX66_RE = re.compile(r'^[0-9a-fA-F]{66}$')
 
-wl=load_words()
-priv_from_mn=None; priv_from_hex=None
+def detect_input(s):
+    s = s.strip()
+    if HEX64_RE.match(s): return ("hex", s.lower())
+    if HEX66_RE.match(s) and (s.startswith("02") or s.startswith("03")): return ("pubkey", s.lower())
+    # else try words (space separated)
+    parts = s.split()
+    if all(re.fullmatch(r"[a-zA-Z]+", w) for w in parts) and len(parts) in (12,15,18,21,24):
+        return ("mnemonic", " ".join(w.lower() for w in parts))
+    return (None, s)
 
-if args.mnemonic:
-    e=mnemonic_to_entropy(args.mnemonic, wl)
-    if len(e)!=32: print("ERR: not 32-byte entropy for 24 words"); sys.exit(2)
-    priv_from_mn=e
-if args.hex:
-    h=args.hex.strip().lower()
-    if len(h)!=64 or any(c not in "0123456789abcdef" for c in h):
-        print("ERR: --hex must be 64 hex chars"); sys.exit(2)
-    priv_from_hex=bytes.fromhex(h)
+def main():
+    ap = argparse.ArgumentParser(description="Verify mnemonic and/or 64-hex private => pubkey. Supports --infile auto-detect.")
+    ap.add_argument("--mnemonic", help="24 words (or 12/15/18/21/24)")
+    ap.add_argument("--hex", help="64 hex chars (32-byte private key)")
+    ap.add_argument("--pubkey", help="optional compressed pubkey (66 hex) to verify, starts with 02/03")
+    ap.add_argument("--infile", help="path to a file that contains either mnemonic, 64-hex priv, or 66-hex compressed pubkey")
+    args = ap.parse_args()
 
-if not args.mnemonic and not args.hex:
-    print("Provide --mnemonic and/or --hex"); sys.exit(2)
+    wl = load_words()
+    priv_from_mn = None
+    priv_from_hex = None
+    pub_from_arg = None
 
-if priv_from_mn and priv_from_hex and priv_from_mn!=priv_from_hex:
-    print("FAIL: mnemonic-derived private != hex private"); sys.exit(1)
+    # infile auto-detect
+    if args.infile:
+        if not os.path.exists(args.infile):
+            print("ERR: infile not found"); sys.exit(2)
+        raw = open(args.infile, "r", encoding="utf-8").read().strip()
+        kind, val = detect_input(raw)
+        if kind is None:
+            print("ERR: could not detect infile contents (not hex, pubkey, or mnemonic)"); sys.exit(2)
+        if kind == "hex":
+            args.hex = val
+        elif kind == "pubkey":
+            args.pubkey = val
+        elif kind == "mnemonic":
+            args.mnemonic = val
 
-priv = priv_from_mn or priv_from_hex
-pubc = priv_to_pubc(priv)
-print("OK")
-print("PRIVATE_HEX:", priv.hex())
-print("PUBKEY_COMPRESSED_HEX:", pubc.hex())
+    # explicit CLI args take precedence (or are now set by infile)
+    if args.mnemonic:
+        e = mnemonic_to_entropy(args.mnemonic, wl)
+        if len(e) != 32:
+            print("ERR: mnemonic did not decode to 32 bytes"); sys.exit(2)
+        priv_from_mn = e
+    if args.hex:
+        h = args.hex.strip().lower()
+        if not HEX64_RE.match(h):
+            print("ERR: --hex must be 64 hex chars"); sys.exit(2)
+        priv_from_hex = bytes.fromhex(h)
+    if args.pubkey:
+        pk = args.pubkey.strip().lower()
+        if not HEX66_RE.match(pk) or not (pk.startswith("02") or pk.startswith("03")):
+            print("ERR: --pubkey must be 66-hex starting with 02/03"); sys.exit(2)
+        pub_from_arg = pk
 
-# Optional pubkey check
-if args.pubkey:
-    pk = args.pubkey.strip().lower()
-    if len(pk) != 66 or not (pk.startswith("02") or pk.startswith("03")):
-        print("ERR: --pubkey must be 66 hex starting with 02 or 03"); sys.exit(2)
-    if pk != pubc.hex():
-        print("FAIL: provided pubkey does NOT match derived pubkey"); sys.exit(1)
-    print("PUBKEY MATCH: provided pubkey == derived pubkey")
+    if not (priv_from_mn or priv_from_hex):
+        print("Provide --mnemonic and/or --hex or use --infile pointing to a file containing one of those"); sys.exit(2)
 
-sys.exit(0)
+    if priv_from_mn and priv_from_hex and priv_from_mn != priv_from_hex:
+        print("FAIL: mnemonic-derived private != hex private"); sys.exit(1)
 
+    priv = priv_from_mn or priv_from_hex
+    pubc = priv_to_pubc(priv)
+    print("OK")
+    print("PRIVATE_HEX:", priv.hex())
+    print("PUBKEY_COMPRESSED_HEX:", pubc.hex())
+
+    if pub_from_arg:
+        if pub_from_arg != pubc.hex():
+            print("FAIL: provided pubkey does NOT match derived pubkey"); sys.exit(1)
+        print("PUBKEY MATCH: provided pubkey == derived pubkey")
+
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
