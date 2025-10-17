@@ -83,9 +83,17 @@ Outputs: `out/<YYYY-mm-dd_HH-MM-SS_RUNID>/`
 
 ### 2) Consistency check (optional)
 
+Normal verification:
+
 ```bash
 python3 scripts/verify_consistency.py --mnemonic "24 words..." --hex 0123...abcd
 # expected output: OK
+```
+
+Extra pubkey check (helpful if someone accidentally copied pubkey into --hex)
+
+```bash
+python3 scripts/verify_consistency.py --mnemonic "..." --hex 0000...abcd --pubkey 02...
 ```
 
 ### 3) Regtest (Core box, offline)
