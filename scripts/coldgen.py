@@ -333,17 +333,38 @@ Regtest helpers (for local verification ONLY)
     sec_path  = os.path.join(run_dir, "SECRET_DO_NOT_EXPORT.txt")
     hint_path = os.path.join(run_dir, "regtest_expected.json")
     qr_dir    = os.path.join(run_dir, "qr")
+    secret_dir= os.path.join(run_dir, "secret")
     os.makedirs(qr_dir, exist_ok=True)
+    os.makedirs(secret_dir, exist_ok=True)
 
+    # Public files
     pub_sha  = write_text(pub_path, public_txt)
-    sec_sha  = write_text(sec_path, secret_txt); os.chmod(sec_path, 0o600)
 
+    # Secret file (owner-only)
+    sec_header = "!!! SECRET - DO NOT COPY, PHOTOGRAPH, OR TRANSFER OVER NETWORK !!!\n\n"
+    sec_sha  = write_text(sec_path, sec_header + secret_txt)
+    os.chmod(sec_path, 0o600)
+
+    # One-line helper files (safe to copy format: but these are secret, keep them private)
+    priv_one = os.path.join(secret_dir, "private_hex.txt")
+    mnem_one = os.path.join(secret_dir, "mnemonic.txt")
+    wif_one  = os.path.join(secret_dir, "wif_mainnet.txt")
+    wif_reg  = os.path.join(secret_dir, "wif_regtest.txt")
+    write_text(priv_one, priv_hex + "\n"); os.chmod(priv_one, 0o600)
+    write_text(mnem_one, mnemonic + "\n"); os.chmod(mnem_one, 0o600)
+    write_text(wif_one, wif_m + "\n"); os.chmod(wif_one, 0o600)
+    write_text(wif_reg, wif_rt + "\n"); os.chmod(wif_reg, 0o600)
+
+    # Public one-line payloads (safe)
+    write_text(os.path.join(qr_dir, "bc1.txt"), bc1 + "\n")
+    write_text(os.path.join(qr_dir, "pubkey.hex"), pubc_hex + "\n")
+    write_text(os.path.join(qr_dir, "pubkey.txt"), pubc_hex + "\n")
+    write_text(os.path.join(qr_dir, "address.txt"), bc1 + "\n")
+
+    # Regtest hint file (secret-ish)
     regtest_json = {"regtest_wif": wif_rt, "regtest_p2pkh": p2pkh_rt,
                     "note": "Contains test WIF. Treat as SECRET. Pass to regtest_check.sh if desired."}
-    hint_sha = write_text(hint_path, json.dumps(regtest_json, indent=2))
-
-    write_text(os.path.join(qr_dir, "bc1.txt"), bc1 + "\n")
-    write_text(os.path.join(qr_dir, "pubkey.txt"), pubc_hex + "\n")
+    hint_sha = write_text(hint_path, json.dumps(regtest_json, indent=2)); os.chmod(hint_path, 0o600)
 
     manifest_lines = [
         f"{sha256_file(pub_path)}  PUBLIC_EXPORT.txt",
@@ -356,10 +377,12 @@ Regtest helpers (for local verification ONLY)
     man_sha = write_text(man_path, "\n".join(manifest_lines) + "\n")
 
     print(f"\nWrote: {pub_path}   (sha256 {pub_sha})")
-    print(f"Wrote: {sec_path}   (sha256 {sec_sha})")
-    print(f"Wrote: {hint_path}  (sha256 {hint_sha})")
+    print(f"Wrote: {sec_path}   (sha256 {sec_sha})  (chmod 600)")
+    print(f"Wrote: {hint_path}  (sha256 {hint_sha})  (chmod 600)")
+    print(f"Wrote helper files in: {qr_dir} (public) and {secret_dir} (secret, chmod 600)")
     print(f"Wrote: {man_path}   (sha256 {man_sha})")
     print("\nDone.")
+
 
 if __name__ == "__main__":
     main()
